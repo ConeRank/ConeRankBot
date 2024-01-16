@@ -1,0 +1,234 @@
+import praw
+import json
+from praw.exceptions import RedditAPIException
+import time
+
+last_processed_comment_id = None
+
+# Reddit API credentials
+
+
+# Subreddit and phrase to search
+SUBREDDIT_NAME = 'Verifiednotarobot'
+PHRASE_TO_SEARCH = 'good cone'
+
+# Initialize Reddit connection
+reddit = praw.Reddit(
+    client_id=CLIENT_ID,
+    client_secret=CLIENT_SECRET,
+    username=USERNAME,
+    password=PASSWORD,
+    user_agent=USER_AGENT
+)
+
+# Global variables
+processed_comments = set()
+leaderboard_file = 'leaderboard.json'
+leaderboard = {}
+
+def save_state():
+    """Save the current state of variables to files."""
+    save_leaderboard()
+    save_processed_comments()
+
+    # Save the last processed comment ID if it is not None
+    if last_processed_comment_id is not None:
+        with open('last_processed_comment_id.txt', 'w') as f:
+            f.write(str(last_processed_comment_id))
+
+def load_state():
+    """Load the saved state of variables from files."""
+    global leaderboard, processed_comments, last_processed_comment_id
+    leaderboard = load_leaderboard()
+    processed_comments = load_processed_comments()
+
+    # Load the last processed comment ID
+    try:
+        with open('last_processed_comment_id.txt', 'r') as f:
+            last_processed_comment_id = f.read().strip()
+    except FileNotFoundError:
+        last_processed_comment_id = None
+
+def save_leaderboard():
+    try:
+        with open(leaderboard_file, 'w') as f:
+            json.dump(leaderboard, f)
+    except Exception as e:
+        print(f"An error occurred while saving leaderboard: {e}")
+        
+def load_leaderboard():
+    try:
+        with open(leaderboard_file, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+
+def save_processed_comments():
+    with open('processed_comments.txt', 'w') as f:
+        for comment_id in processed_comments:
+            f.write(comment_id + '\n')
+
+
+def load_processed_comments():
+    try:
+        with open('processed_comments.txt', 'r') as f:
+            lines = f.read().splitlines()
+            return set(lines) if lines else set()
+    except FileNotFoundError:
+        return set()
+
+def handle_ratelimit_exception(exception):
+    print(f"Caught Reddit API Exception: {exception}")
+
+    # Sleep for the required duration before trying again
+    try:
+        sleep_duration = int(str(exception).split("for")[1].split("minutes")[0].strip()) * 60 + 30
+    except (ValueError, IndexError):
+        sleep_duration = 60  # Default to 1 minute if conversion fails
+
+    print(f"Sleeping for {sleep_duration} seconds at {time.strftime('%Y-%m-%d %H:%M:%S')}...")
+
+    # Record start timestamp
+    start_timestamp = time.time()
+
+    # Use the standard time.sleep function
+    time.sleep(sleep_duration)
+
+    # Record end timestamp
+    end_timestamp = time.time()
+
+    print(f"Awake now at {time.strftime('%Y-%m-%d %H:%M:%S')}! Slept for {end_timestamp - start_timestamp:.2f} seconds.")
+
+
+def get_leaderboard_position(user_key):
+    sorted_leaderboard = sorted(leaderboard.items(), key=lambda x: x[1], reverse=False)
+    return next((i + 1 for i, (user, _) in enumerate(sorted_leaderboard) if user == user_key), None)
+
+
+def main():
+    global processed_comments, leaderboard, last_processed_comment_id
+    print("Bot is now running...")
+
+    # Load processed comments and leaderboard from previous runs
+    load_state()
+
+    try:
+        # Stream comments from the subreddit
+        subreddit = reddit.subreddit(SUBREDDIT_NAME)
+        for comment in subreddit.stream.comments(skip_existing=False):
+            # Process the comment
+            process_comment(comment)
+
+            # Update the last processed comment ID if the comment was processed successfully
+            # Update the last processed comment ID if the comment was processed successfully
+            if comment.id:
+                last_processed_comment_id = comment.id
+
+            # Save the state for every processed comment
+            save_state()
+
+    except RedditAPIException as e:
+        handle_ratelimit_exception(e)
+
+    # Update last_processed_comment_id to the one that caused the rate limit
+        last_processed_comment_id = comment.id if comment else None
+
+    # Restart the stream after the sleep, starting from the last processed comment ID
+        if last_processed_comment_id:
+            main()
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+    finally:
+        # Save the final state before exiting
+        save_state()
+
+def process_comment(comment):
+    global leaderboard, processed_comments
+    # print(f"Processing comment: {comment.id}")
+
+    try:
+        # Check if the comment has already been processed
+        if comment.id in processed_comments:
+            print(f"Skipping already processed comment: {comment.id}")
+            return
+
+        # Check if the comment has a submission and author
+        if comment.submission and comment.submission.author:
+            comment_author = comment.author
+
+            # Check if the phrase is present in the comment body
+            if PHRASE_TO_SEARCH.lower() in comment.body.lower():
+                parent_comment = comment.parent()
+
+                # Check if the parent comment has an author
+                if parent_comment and parent_comment.author:
+                    if comment_author:
+                        user_key = comment_author.name
+                        parent_user_key = parent_comment.author.name
+
+                        # Check if the user is trying to "good cone" themselves
+                        if user_key == parent_user_key:
+                            # Reply with a message about self-good-cone attempt
+                            reply_message = (
+                                "When nobody else celebrates you, learn to celebrate yourself. "
+                                "When nobody else compliments you, then compliment yourself. "
+                                "It's not up to other people to keep you encouraged. It's up to you. "
+                                "Encouragement should come from the inside. However, you can't call yourself a Good C0ne."
+                            )
+
+                            try:
+                                comment.reply(reply_message)
+                                print(f"Replied to self-good-cone attempt by {user_key} with: {reply_message}")
+                            except RedditAPIException as e:
+                                handle_ratelimit_exception(e)
+
+                            print(f"Added self-good-cone attempt {comment.id} to processed_comments")
+                            processed_comments.add(comment.id)
+                            save_processed_comments()  # Save the updated processed comments set
+                            return
+
+                        # Check if the comment ID has already been processed for a "good cone"
+                        if comment.id in processed_comments:
+                            print(f"Skipping already processed comment: {comment.id}")
+                            return
+
+                        # Update the leaderboard only if all checks pass
+                        leaderboard[parent_user_key] = leaderboard.get(parent_user_key, 0) + 1
+
+                        # Save the updated leaderboard
+                        save_leaderboard()
+
+                        # Sort the leaderboard based on counts in descending order
+                        sorted_leaderboard = sorted(leaderboard.items(), key=lambda x: x[1], reverse=True)
+
+                        parent_position = get_leaderboard_position(parent_user_key, sorted_leaderboard)
+                        parent_count = leaderboard[parent_user_key]
+
+                        reply_message = f"Thank you, u/{user_key}, for voting on u/{parent_user_key} for being a great cone. " \
+                                        f"{parent_user_key} is currently placed #{parent_position} on the leaderboard " \
+                                        f"and has received {parent_count} good-cone's."
+
+                        try:
+                            # Reply only if all checks pass
+                            comment.reply(reply_message)
+                            print(f"Replied to comment {comment.id} with: {reply_message}")
+
+                            # Add the comment ID to the processed set only if the reply was successful
+                            processed_comments.add(comment.id)
+                            print(f"Added comment {comment.id} to processed_comments")
+                            save_processed_comments()  # Save the updated processed comments set
+
+                        except RedditAPIException as e:
+                            handle_ratelimit_exception(e)
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        
+def get_leaderboard_position(user_key, sorted_leaderboard):
+    return next((i + 1 for i, (user, _) in enumerate(sorted_leaderboard) if user == user_key), None)
+
+if __name__ == '__main__':
+    main()
