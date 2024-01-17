@@ -3,13 +3,12 @@ import json
 from praw.exceptions import RedditAPIException
 import time
 
+# Your Reddit API credentials
+
 last_processed_comment_id = None
 
-# Reddit API credentials
-
-
 # Subreddit and phrase to search
-SUBREDDIT_NAME = 'Verifiednotarobot'
+SUBREDDIT_NAME = 'Coneheads'
 PHRASE_TO_SEARCH = 'good cone'
 
 # Initialize Reddit connection
@@ -26,6 +25,7 @@ processed_comments = set()
 leaderboard_file = 'leaderboard.json'
 leaderboard = {}
 
+
 def save_state():
     """Save the current state of variables to files."""
     save_leaderboard()
@@ -35,6 +35,7 @@ def save_state():
     if last_processed_comment_id is not None:
         with open('last_processed_comment_id.txt', 'w') as f:
             f.write(str(last_processed_comment_id))
+
 
 def load_state():
     """Load the saved state of variables from files."""
@@ -49,19 +50,22 @@ def load_state():
     except FileNotFoundError:
         last_processed_comment_id = None
 
+
 def save_leaderboard():
     try:
         with open(leaderboard_file, 'w') as f:
             json.dump(leaderboard, f)
     except Exception as e:
         print(f"An error occurred while saving leaderboard: {e}")
-        
+
+
 def load_leaderboard():
     try:
         with open(leaderboard_file, 'r') as f:
             return json.load(f)
-    except FileNotFoundError:
+    except (FileNotFoundError, json.decoder.JSONDecodeError):
         return {}
+
 
 
 def save_processed_comments():
@@ -77,6 +81,7 @@ def load_processed_comments():
             return set(lines) if lines else set()
     except FileNotFoundError:
         return set()
+
 
 def handle_ratelimit_exception(exception):
     print(f"Caught Reddit API Exception: {exception}")
@@ -101,8 +106,7 @@ def handle_ratelimit_exception(exception):
     print(f"Awake now at {time.strftime('%Y-%m-%d %H:%M:%S')}! Slept for {end_timestamp - start_timestamp:.2f} seconds.")
 
 
-def get_leaderboard_position(user_key):
-    sorted_leaderboard = sorted(leaderboard.items(), key=lambda x: x[1], reverse=False)
+def get_leaderboard_position(user_key, sorted_leaderboard):
     return next((i + 1 for i, (user, _) in enumerate(sorted_leaderboard) if user == user_key), None)
 
 
@@ -116,11 +120,10 @@ def main():
     try:
         # Stream comments from the subreddit
         subreddit = reddit.subreddit(SUBREDDIT_NAME)
-        for comment in subreddit.stream.comments(skip_existing=False):
+        for comment in subreddit.stream.comments(skip_existing=True):
             # Process the comment
             process_comment(comment)
 
-            # Update the last processed comment ID if the comment was processed successfully
             # Update the last processed comment ID if the comment was processed successfully
             if comment.id:
                 last_processed_comment_id = comment.id
@@ -128,15 +131,19 @@ def main():
             # Save the state for every processed comment
             save_state()
 
+            # Introduce a delay of 1 second
+            time.sleep(1)
+
     except RedditAPIException as e:
         handle_ratelimit_exception(e)
 
-    # Update last_processed_comment_id to the one that caused the rate limit
+        # Update last_processed_comment_id to the one that caused the rate limit
         last_processed_comment_id = comment.id if comment else None
 
-    # Restart the stream after the sleep, starting from the last processed comment ID
+        # Restart the stream after the sleep, starting from the last processed comment ID
         if last_processed_comment_id:
             main()
+
 
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -144,6 +151,7 @@ def main():
     finally:
         # Save the final state before exiting
         save_state()
+
 
 def process_comment(comment):
     global leaderboard, processed_comments
@@ -167,7 +175,9 @@ def process_comment(comment):
                 if parent_comment and parent_comment.author:
                     if comment_author:
                         user_key = comment_author.name
-                        parent_user_key = parent_comment.author.name
+                        parent_user_key = parent_comment.author.name if parent_comment.author else None
+
+
 
                         # Check if the user is trying to "good cone" themselves
                         if user_key == parent_user_key:
@@ -226,9 +236,7 @@ def process_comment(comment):
 
     except Exception as e:
         print(f"An error occurred: {e}")
-        
-def get_leaderboard_position(user_key, sorted_leaderboard):
-    return next((i + 1 for i, (user, _) in enumerate(sorted_leaderboard) if user == user_key), None)
+
 
 if __name__ == '__main__':
     main()
